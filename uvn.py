@@ -10,12 +10,13 @@ from typing_extensions import Annotated
 from inspect import Signature, Parameter
 
 import typer
+import shellingham
 from click.core import Context
 from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
 assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
@@ -183,3 +184,27 @@ def remove(env_name: str) -> None:
         return
     shutil.rmtree(path)
     console.print(f"Environment {env_name} was removed!")
+
+
+@app.command()
+def activate(env_name: str) -> None:
+    """Print the activation command for the given environment."""
+    path = UVN_DIR / env_name
+    env_name = f"[yellow]{env_name}[/yellow]"
+    if not path.exists():
+        console.print(f"Environment {env_name} not found!", style="italic")
+        return
+    # https://docs.python.org/3/library/venv.html#how-venvs-work
+    shell, _ = shellingham.detect_shell()
+    command = {
+        "bash": "source {}/bin/activate",
+        "zsh": "source {}/bin/activate",
+        "fish": "source {}/bin/activate.fish",
+        "csh": "source {}/bin/activate.csh",
+        "tcsh": "source {}/bin/activate.csh",
+        "nu": "source {}/bin/activate.nu",
+        "pwsh": "{}/bin/Activate.ps1",
+        "powershell": "{}/Scripts/Activate.ps1",
+        "cmd": "{}/Scripts/activate.bat",
+    }[shell].format(str(path))
+    console.print(command)
