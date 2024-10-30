@@ -9,19 +9,26 @@ from typing_extensions import Annotated
 from inspect import Signature, Parameter
 
 import typer
+from click.core import Context
 from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
-assert (
-    UVN_DIR.is_absolute()
-), f"Environments path must be absolute: UVN_DIR={str(UVN_DIR)}"
+assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
 
 
-app = typer.Typer()
+class PrefixTyperGroup(typer.core.TyperGroup):
+    def get_command(self, ctx: Context, cmd_name: str):
+        matches = [c for c in self.commands if c.startswith(cmd_name)]
+        if len(matches) == 1:
+            cmd_name = matches[0]
+        return super().get_command(ctx, cmd_name)
+
+
+app = typer.Typer(cls=PrefixTyperGroup)
 console = Console()
 
 
@@ -152,8 +159,9 @@ def wrap_create(func):
 def create(env_name: str, **kwargs) -> None:
     """Create a new virtual environment."""
     path = UVN_DIR / env_name
+    env_name = f"[yellow]{env_name}[/yellow]"
     if path.exists():
-        console.print(f"[yellow]{env_name}[/yellow] exists!", style="italic")
+        console.print(f"Environment {env_name} exists!", style="italic")
         return
     options = []
     for k, v in kwargs.items():
