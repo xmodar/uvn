@@ -2,6 +2,7 @@ import os
 import re
 import math
 import shutil
+import tempfile
 import subprocess
 from enum import Enum
 from pathlib import Path
@@ -16,7 +17,8 @@ from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
+__all__ = ["UVN_DIR", "app", "list_envs", "create", "remove", "export", "activate"]
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
 assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
@@ -46,9 +48,7 @@ def get_path_size(path: "str | Path") -> int:
 
 
 def format_data_size(num_bytes: int) -> str:
-    power = math.floor(math.log(num_bytes, 1024))
-    prefix = "KMGTPEZY"[power - 1] if power > 0 else ""
-    return f"{num_bytes * 1024**-power:.2f} {prefix}B"
+    return f"{num_bytes * 1024**-(p := round(math.log(num_bytes, 1024))):.2f} {' KMGTPEZY'[p]}B"
 
 
 def get_version(python_path: "str | Path") -> str:
@@ -168,7 +168,7 @@ def create(env_name: str, **kwargs) -> None:
     options = []
     for k, v in kwargs.items():
         if v not in (None, False):
-            options.append(f"--{k}")
+            options.append(f"--{k.replace('_', '-')}")
             if v is not True:
                 options.append(v)
     subprocess.run(["uv", "venv", *options, path])
@@ -210,56 +210,117 @@ def activate(env_name: str) -> None:
     console.print(command, highlight=False)
 
 
-@app.command(no_args_is_help=True)
-def export(env_name: str, script: bool = False, to: Path = None) -> None:
-    """Export a virtual environment requirements or as inline script metadata."""
+def run_in_env(env_name: str, *args, **kwargs):
     path = UVN_DIR / env_name
     if not path.exists():
         env_name = f"[yellow]{env_name}[/yellow]"
         console.print(f"Environment {env_name} not found!", style="italic")
         return
-    env = os.environ.copy()
-    env["VIRTUAL_ENV"] = str(path)
-    if script or to and to.suffix == ".py":
-        res = subprocess.run(
-            ["uv", "pip", "tree", "-d", "0"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-        )
-        version = res.stderr.split(" ", 3)[-2]
-        dep = res.stdout.replace(" v", ">=").strip()
-        req = "#!/usr/bin/env -S uv run"
-        req += "\n# /// script"
-        major, minor, _ = version.split(".", 2)
-        limit = f"{major}.{int(minor) + 1}"
-        req += f'\n# requires-python = ">={version},<{limit}"'
-        if dep:
-            req += "\n# dependencies = ["
-            for line in dep.splitlines():
-                req += f'\n#     "{line}",'
-            req += "\n# ]"
-        req += "\n# ///\n"
+    kwargs.setdefault("env", os.environ)
+    kwargs["env"] = kwargs["env"].copy()
+    kwargs["env"]["VIRTUAL_ENV"] = str(path)
+    return subprocess.run(*args, **kwargs)
+
+
+def get_dependencies(env_name: str, short: bool = True) -> "str | None":
+    options = ["tree", "-d", "0"] if short else ["freeze"]
+    res = run_in_env(
+        env_name,
+        ["uv", "pip"] + options,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if res is None:
+        return
+    version = res.stderr.split(" ", 3)[-2]
+    dep = f"# python=={version}\n{res.stdout}"
+    if short:
+        dep = dep.replace(" v", "==")
+    return dep.strip()
+
+
+def to_inline_script(dependencies: str) -> str:
+    version, dep = dependencies.split("\n", 1)
+    dep = dep.replace("==", ">=")
+    dep = "\n".join(f'#     "{d}",' for d in dep.splitlines())
+    dep = f"# dependencies = [\n{dep}\n# ]\n" if dep else ""
+
+    _, version = version.split("==")
+    major, minor, _ = version.split(".", 2)
+    limit = f"{major}.{int(minor) + 1}"
+    python = f'# requires-python = ">={version},<{limit}"\n'
+
+    return f"#!/usr/bin/env -S uv run\n# /// script\n{python}{dep}# ///\n"
+
+
+def remove_inline_script(text: str) -> str:
+    return re.sub("^(?:#!.*\n)?# /// script\n(# .*\n)*?# ///\n", "", text)
+
+
+def clone(env_name: str, new_env: str) -> bool:
+    path = UVN_DIR / new_env
+    if path.exists():
+        new_env = f"[yellow]{new_env}[/yellow]"
+        console.print(f"Environment {new_env} exists!", style="italic")
+        return False
+
+    dep = get_dependencies(env_name, short=False)
+    if dep is None:
+        return False
+    version, dep = dep.split("\n", 1)
+    _, version = version.split("==")
+
+    res = subprocess.run(["uv", "venv", "-p", version, "--no-project", path])
+    if res.returncode != 0:
+        return False
+
+    if dep:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as file:
+            file.write(dep)
+            file.flush()
+            run_in_env(new_env, ["uv", "pip", "install", "-r", file.name])
+    return True
+
+
+@app.command(no_args_is_help=True)
+def export(
+    env_name: str,
+    to: Annotated[
+        Path,
+        typer.Option(help="Export to (*.txt | *.py | <NEW_ENV_NAME>)"),
+    ] = None,
+    script: bool = False,
+    short: bool = False,
+) -> None:
+    """Export a virtual environment requirements or as inline script metadata."""
+    if to:
+        if str(to) == to.stem:
+            clone(env_name, new_env=to.stem)
+            return
+        elif to.suffix == ".txt":
+            script = False
+        elif to.suffix == ".py":
+            script = True
+        else:
+            console.print(f"Invalid target: [blue]{to}[/blue]", style="italic")
+            return
+
+    dep = get_dependencies(env_name, short)
+    if dep is None:
+        return
+    if script:
+        dep = to_inline_script(dep)
     else:
-        res = subprocess.run(
-            ["uv", "pip", "freeze"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-        )
-        version = res.stderr.split(" ", 3)[-2]
-        req = f"# python=={version}\n{res.stdout}"
+        dep += "\n"
+
     if to:
         to = to.expanduser()
         if to.suffix == ".py" and to.exists():
-            text = to.read_text()
-            text = re.sub("^(?:#!.*\n)?# /// script\n(# .*\n)*?# ///\n", "", text)
-            req += text
+            dep += remove_inline_script(to.read_text())
         else:
             to.parent.mkdir(parents=True, exist_ok=True)
-        to.write_text(req)
+        to.write_text(dep)
         console.print(f"File [blue]{to}[/blue] updated!")
     else:
-        console.print(req, end="", highlight=False)
+        console.print(dep, end="", highlight=False)
