@@ -5,6 +5,8 @@ keywords = ["uvn", "uv", "conda", "venv", "virtualenv", "uvenv"]
 authors = [
     { name = "Modar M. Alfadly", email = "modar.alfadly@gmail.com" }
 ]
+urls = {Homepage = "https://github.com/xmodar/uvn"}
+scripts = {uvn = "uvn:app"}
 readme = "README.md"
 license = {file = "LICENSE"}
 dynamic = ["version"]
@@ -25,12 +27,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-
-[project.urls]
-Homepage = "https://github.com/xmodar/uvn"
-
-[project.scripts]
-uvn = "uvn:app"
 
 [build-system]
 requires = ["hatchling"]
