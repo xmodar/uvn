@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import shutil
 import subprocess
 from enum import Enum
 from pathlib import Path
@@ -14,7 +15,7 @@ from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
 assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
@@ -170,3 +171,15 @@ def create(env_name: str, **kwargs) -> None:
             if v is not True:
                 options.append(v)
     subprocess.run(["uv", "venv", *options, path])
+
+
+@app.command(no_args_is_help=True)
+def remove(env_name: str) -> None:
+    """Remove a virtual environment."""
+    path = UVN_DIR / env_name
+    env_name = f"[yellow]{env_name}[/yellow]"
+    if not path.exists():
+        console.print(f"Environment {env_name} not found!", style="italic")
+        return
+    shutil.rmtree(path)
+    console.print(f"Environment {env_name} was removed!")
