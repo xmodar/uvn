@@ -17,7 +17,7 @@ from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 __all__ = ["UVN_DIR", "app", "list_envs", "create", "remove", "export", "activate"]
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
@@ -187,27 +187,36 @@ def remove(env_name: str) -> None:
 
 
 @app.command(no_args_is_help=True)
-def activate(env_name: str) -> None:
-    """Print the activation command for the given environment."""
+def activate(env_name: str, quiet: bool = False) -> None:
+    """Output the command to activate the specified environment."""
+    if not env_name:
+        if not quiet:
+            console.print("Environment name is missing!", style="italic")
+        return
     path = UVN_DIR / env_name
     if not path.exists():
-        env_name = f"[yellow]{env_name}[/yellow]"
-        console.print(f"Environment {env_name} not found!", style="italic")
+        if not quiet:
+            env_name = f"[yellow]{env_name}[/yellow]"
+            console.print(f"Environment {env_name} not found!", style="italic")
         return
-    # https://docs.python.org/3/library/venv.html#how-venvs-work
-    shell, _ = shellingham.detect_shell()
-    command = {
-        "bash": "source {}/bin/activate",
-        "zsh": "source {}/bin/activate",
-        "fish": "source {}/bin/activate.fish",
-        "csh": "source {}/bin/activate.csh",
-        "tcsh": "source {}/bin/activate.csh",
-        "nu": "source {}/bin/activate.nu",
-        "pwsh": "{}/bin/Activate.ps1",
-        "powershell": "{}/Scripts/Activate.ps1",
-        "cmd": "{}/Scripts/activate.bat",
-    }[shell].format(str(path))
-    console.print(command, highlight=False)
+    try:
+        # https://docs.python.org/3/library/venv.html#how-venvs-work
+        shell, _ = shellingham.detect_shell()
+        command = {
+            "bash": "source {}/bin/activate",
+            "zsh": "source {}/bin/activate",
+            "fish": "source {}/bin/activate.fish",
+            "csh": "source {}/bin/activate.csh",
+            "tcsh": "source {}/bin/activate.csh",
+            "nu": "source {}/bin/activate.nu",
+            "pwsh": "{}/bin/Activate.ps1",
+            "powershell": "{}/Scripts/Activate.ps1",
+            "cmd": "{}/Scripts/activate.bat",
+        }[shell].format(str(path))
+        console.print(command, highlight=False)
+    except Exception as exception:
+        if not quiet:
+            raise exception
 
 
 def run_in_env(env_name: str, *args, **kwargs):
@@ -293,7 +302,7 @@ def export(
     script: bool = False,
     short: bool = False,
 ) -> None:
-    """Export a virtual environment requirements or as inline script metadata."""
+    """Export a virtual environment as requirements or inline script metadata."""
     if to:
         if str(to) == to.stem:
             clone(env_name, new_env=to.stem)
