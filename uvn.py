@@ -1,14 +1,19 @@
 import os
+import re
 import math
 import subprocess
+from enum import Enum
 from pathlib import Path
+from functools import wraps
+from typing_extensions import Annotated
+from inspect import Signature, Parameter
 
 import typer
 from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
 assert (
@@ -69,3 +74,91 @@ def list_envs(size: bool = False, head: bool = True) -> None:
     if envs:
         console.print(table)
     console.print(f"Found {len(envs)} environments.", style="italic")
+
+
+def parse_venv_options():
+    msg = subprocess.run(["uv", "venv", "-h"], stdout=subprocess.PIPE).stdout.decode()
+    msg = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", msg)  # remove ANSI colors
+    msg = re.sub(r"\n  -\w,", "\n     ", msg)  # remove short names
+    msg = re.sub(r"\n {10,}", " ", msg)  # rejoin lines
+    pattern = re.compile(
+        r" {6}--(?P<name>[a-z\-]+)\.*"
+        r"(?: ?<(?P<var>[A-Z_]+)>)?\s*"
+        r"(?: ?\(Deprecated: (?P<deprecated>[^\)]*)\))?"
+        r"(?P<help>[^\[\n]+)"
+        r"(?: ?\[default: (?P<default>[^\]]+)\])?"
+        r"(?: ?\[env: (?P<env>[^\]=]+)=?\])?"
+        r"(?: ?\[possible values: (?P<choices>[^\]]+)\])?"
+    )
+    return {
+        opt["name"]: (
+            Enum(
+                "".join(x.title() for x in opt["name"].split("-")),
+                {choice: choice for choice in opt["choices"]},
+                type=str,
+            )
+            if opt["choices"]
+            else opt["type"],
+            typer.Option(
+                "--" + opt["name"],
+                envvar=opt["env"],
+                help=opt["help"],
+                show_default=bool(opt["default"]),
+            ),
+            opt["default"] if opt["type"] is str else False,
+        )
+        for m in pattern.finditer(msg)
+        if not (
+            opt := {
+                "name": m.group("name"),
+                "type": str if m.group("var") else bool,
+                "deprecated": m.group("deprecated"),
+                "help": m.group("help").strip(),
+                "default": m.group("default"),
+                "env": m.group("env"),
+                "choices": c.split(", ") if (c := m.group("choices")) else [],
+            }
+        )["deprecated"]
+        and opt["name"] != "help"
+    }
+
+
+def wrap_create(func):
+    sig = Signature(
+        [Parameter("env_name", Parameter.POSITIONAL_OR_KEYWORD, annotation=str)]
+        + [
+            Parameter(
+                name.replace("-", "_"),
+                Parameter.POSITIONAL_OR_KEYWORD,
+                default=default,
+                annotation=Annotated[type_, option],
+            )
+            for name, (type_, option, default) in parse_venv_options().items()
+        ]
+    )
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        bound_args = sig.bind(*args, **kwargs)
+        bound_args.apply_defaults()
+        return func(**bound_args.arguments)
+
+    wrapper.__signature__ = sig
+    return wrapper
+
+
+@app.command(no_args_is_help=True)
+@wrap_create
+def create(env_name: str, **kwargs) -> None:
+    """Create a new virtual environment."""
+    path = UVN_DIR / env_name
+    if path.exists():
+        console.print(f"[yellow]{env_name}[/yellow] exists!", style="italic")
+        return
+    options = []
+    for k, v in kwargs.items():
+        if v not in (None, False):
+            options.append(f"--{k}")
+            if v is not True:
+                options.append(v)
+    subprocess.run(["uv", "venv", *options, path])
