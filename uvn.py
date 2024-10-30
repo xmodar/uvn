@@ -16,7 +16,7 @@ from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
 assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
@@ -161,8 +161,8 @@ def wrap_create(func):
 def create(env_name: str, **kwargs) -> None:
     """Create a new virtual environment."""
     path = UVN_DIR / env_name
-    env_name = f"[yellow]{env_name}[/yellow]"
     if path.exists():
+        env_name = f"[yellow]{env_name}[/yellow]"
         console.print(f"Environment {env_name} exists!", style="italic")
         return
     options = []
@@ -183,15 +183,15 @@ def remove(env_name: str) -> None:
         console.print(f"Environment {env_name} not found!", style="italic")
         return
     shutil.rmtree(path)
-    console.print(f"Environment {env_name} was removed!")
+    console.print(f"Environment {env_name} was removed!", style="italic")
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def activate(env_name: str) -> None:
     """Print the activation command for the given environment."""
     path = UVN_DIR / env_name
-    env_name = f"[yellow]{env_name}[/yellow]"
     if not path.exists():
+        env_name = f"[yellow]{env_name}[/yellow]"
         console.print(f"Environment {env_name} not found!", style="italic")
         return
     # https://docs.python.org/3/library/venv.html#how-venvs-work
@@ -207,4 +207,59 @@ def activate(env_name: str) -> None:
         "powershell": "{}/Scripts/Activate.ps1",
         "cmd": "{}/Scripts/activate.bat",
     }[shell].format(str(path))
-    console.print(command)
+    console.print(command, highlight=False)
+
+
+@app.command(no_args_is_help=True)
+def export(env_name: str, script: bool = False, to: Path = None) -> None:
+    """Export a virtual environment requirements or as inline script metadata."""
+    path = UVN_DIR / env_name
+    if not path.exists():
+        env_name = f"[yellow]{env_name}[/yellow]"
+        console.print(f"Environment {env_name} not found!", style="italic")
+        return
+    env = os.environ.copy()
+    env["VIRTUAL_ENV"] = str(path)
+    if script or to and to.suffix == ".py":
+        res = subprocess.run(
+            ["uv", "pip", "tree", "-d", "0"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        version = res.stderr.split(" ", 3)[-2]
+        dep = res.stdout.replace(" v", ">=").strip()
+        req = "#!/usr/bin/env -S uv run"
+        req += "\n# /// script"
+        major, minor, _ = version.split(".", 2)
+        limit = f"{major}.{int(minor) + 1}"
+        req += f'\n# requires-python = ">={version},<{limit}"'
+        if dep:
+            req += "\n# dependencies = ["
+            for line in dep.splitlines():
+                req += f'\n#     "{line}",'
+            req += "\n# ]"
+        req += "\n# ///\n"
+    else:
+        res = subprocess.run(
+            ["uv", "pip", "freeze"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        version = res.stderr.split(" ", 3)[-2]
+        req = f"# python=={version}\n{res.stdout}"
+    if to:
+        to = to.expanduser()
+        if to.suffix == ".py" and to.exists():
+            text = to.read_text()
+            text = re.sub("^(?:#!.*\n)?# /// script\n(# .*\n)*?# ///\n", "", text)
+            req += text
+        else:
+            to.parent.mkdir(parents=True, exist_ok=True)
+        to.write_text(req)
+        console.print(f"File [blue]{to}[/blue] updated!")
+    else:
+        console.print(req, end="", highlight=False)
