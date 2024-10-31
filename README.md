@@ -104,11 +104,11 @@ uvn remove test
 The `export` command offers various options for exporting environment configurations.
 
 ```bash
-# Print top-level dependencies only
-uvn export test --short
+# Print dependencies as in requirements.txt
+uvn export test
 
 # Export inline script metadata
-uvn export test --short --script
+uvn export test --top-level --script
 
 # Generate a requirements.txt file
 uvn export test --to requirements.txt
@@ -132,9 +132,9 @@ Usage: uvn [OPTIONS] COMMAND [ARGS]...
 
 ╭─ Commands ──────────────────────────────────────────────────────────────────────────────────────────╮
  list       List all available virtual environments.
- create     Create a new virtual environment.
+ create     Create a virtual environment.
  remove     Remove a virtual environment.
- export     Export a virtual environment as requirements or inline script metadata.
+ export     Export or clone a virtual environment.
  activate   Output the command to activate the specified environment.
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
