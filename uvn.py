@@ -6,18 +6,16 @@ import tempfile
 import subprocess
 from enum import Enum
 from pathlib import Path
-from functools import wraps
+from typing import Optional
 from typing_extensions import Annotated
-from inspect import Signature, Parameter
 
 import typer
 import shellingham
-from click.core import Context
 from rich.table import Table
 from rich.console import Console
 from rich.box import SIMPLE_HEAD
 
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 __all__ = ["UVN_DIR", "app", "list_envs", "create", "remove", "export", "activate"]
 
 UVN_DIR = Path(os.getenv("UVN_DIR", "~/.virtualenvs")).expanduser()
@@ -25,7 +23,7 @@ assert UVN_DIR.is_absolute(), f"Path is not absolute: UVN_DIR={str(UVN_DIR)}"
 
 
 class PrefixTyperGroup(typer.core.TyperGroup):
-    def get_command(self, ctx: Context, cmd_name: str):
+    def get_command(self, ctx: typer.Context, cmd_name: str):
         matches = [c for c in self.commands if c.startswith(cmd_name)]
         if len(matches) == 1:
             cmd_name = matches[0]
@@ -85,92 +83,64 @@ def list_envs(size: bool = False, head: bool = True) -> None:
     console.print(f"Found {len(envs)} environments.", style="italic")
 
 
-def parse_venv_options():
-    msg = subprocess.run(["uv", "venv", "-h"], stdout=subprocess.PIPE).stdout.decode()
-    msg = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", msg)  # remove ANSI colors
-    msg = re.sub(r"\n  -\w,", "\n     ", msg)  # remove short names
-    msg = re.sub(r"\n {10,}", " ", msg)  # rejoin lines
-    pattern = re.compile(
-        r" {6}--(?P<name>[a-z\-]+)\.*"
-        r"(?: ?<(?P<var>[A-Z_]+)>)?\s*"
-        r"(?: ?\(Deprecated: (?P<deprecated>[^\)]*)\))?"
-        r"(?P<help>[^\[\n]+)"
-        r"(?: ?\[default: (?P<default>[^\]]+)\])?"
-        r"(?: ?\[env: (?P<env>[^\]=]+)=?\])?"
-        r"(?: ?\[possible values: (?P<choices>[^\]]+)\])?"
-    )
-    return {
-        opt["name"]: (
-            Enum(
-                "".join(x.title() for x in opt["name"].split("-")),
-                {choice: choice for choice in opt["choices"]},
-                type=str,
-            )
-            if opt["choices"]
-            else opt["type"],
-            typer.Option(
-                "--" + opt["name"],
-                envvar=opt["env"],
-                help=opt["help"],
-                show_default=bool(opt["default"]),
-            ),
-            opt["default"] if opt["type"] is str else False,
-        )
-        for m in pattern.finditer(msg)
-        if not (
-            opt := {
-                "name": m.group("name"),
-                "type": str if m.group("var") else bool,
-                "deprecated": m.group("deprecated"),
-                "help": m.group("help").strip(),
-                "default": m.group("default"),
-                "env": m.group("env"),
-                "choices": c.split(", ") if (c := m.group("choices")) else [],
-            }
-        )["deprecated"]
-        and opt["name"] != "help"
-    }
-
-
-def wrap_create(func):
-    sig = Signature(
-        [Parameter("env_name", Parameter.POSITIONAL_OR_KEYWORD, annotation=str)]
-        + [
-            Parameter(
-                name.replace("-", "_"),
-                Parameter.POSITIONAL_OR_KEYWORD,
-                default=default,
-                annotation=Annotated[type_, option],
-            )
-            for name, (type_, option, default) in parse_venv_options().items()
-        ]
-    )
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        bound_args = sig.bind(*args, **kwargs)
-        bound_args.apply_defaults()
-        return func(**bound_args.arguments)
-
-    wrapper.__signature__ = sig
-    return wrapper
+class LinkMode(str, Enum):
+    clone = "clone"
+    copy = "copy"
+    hardlink = "hardlink"
+    symlink = "symlink"
 
 
 @app.command(no_args_is_help=True)
-@wrap_create
-def create(env_name: str, **kwargs) -> None:
+def create(
+    env_name: Annotated[
+        str,
+        typer.Argument(
+            help="The name of the virtual environment to create.",
+            show_default=False,
+        ),
+    ],
+    python: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The Python interpreter to use for the virtual environment.",
+            envvar="UV_PYTHON",
+            show_default=False,
+        ),
+    ] = None,
+    prompt: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Provide an alternative prompt prefix for the virtual environment.",
+            show_default=False,
+        ),
+    ] = None,
+    link_mode: Annotated[
+        Optional[LinkMode],
+        typer.Option(
+            help="The method to use when installing packages from the global cache.",
+            envvar="UV_LINK_MODE",
+            show_default=False,
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", help="Do not print any output.")
+    ] = False,
+) -> None:
     """Create a new virtual environment."""
     path = UVN_DIR / env_name
     if path.exists():
         env_name = f"[yellow]{env_name}[/yellow]"
         console.print(f"Environment {env_name} exists!", style="italic")
         return
-    options = []
-    for k, v in kwargs.items():
-        if v not in (None, False):
-            options.append(f"--{k.replace('_', '-')}")
-            if v is not True:
-                options.append(v)
+    options = ["--no-project", "--no-config", "--python-preference", "only-managed"]
+    if python:
+        options.extend(["--python", python])
+    if prompt:
+        options.extend(["--prompt", prompt])
+    if link_mode:
+        options.extend(["--link-mode", link_mode])
+    if quiet:
+        options.append("--quiet")
     subprocess.run(["uv", "venv", *options, path])
 
 
