@@ -32,14 +32,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 > [!CAUTION]
 > Do not install `uv` via `pip`; use the shell commands above.
 
-Then, install `uvn`.
+Then, install `uvn` with the `cli` extra.
 
 ```bash
 # From PyPI
-uv tool install uvn
+uv tool install uvn[cli]
 
 # From GitHub
-uv tool install git+https://github.com/xmodar/uvn
+uv tool install uvn[cli] @ git+https://github.com/xmodar/uvn
 ```
 
 > [!IMPORTANT]
@@ -51,8 +51,8 @@ Finally, install `uvna` for easy shell activation (e.g., in `~/.bashrc` for `bas
 target="~/.bashrc"
 uvna=$(cat <<'EOF'
 uvna() {
-    activate=$(uvn activate "$1")
-    if [[ "$activate" == "source*" ]]; then
+    activate=$(uvn activate --quiet "$1")
+    if [[ -n "$activate" ]]; then
         eval "$activate"
     else
         uvn list
@@ -101,6 +101,13 @@ uvn list --size
 uvn remove test
 ```
 
+To install packages, you can simply use `uv pip` in an activated environment.
+
+```bash
+uvna test
+uv pip install # ...
+```
+
 The `export` command offers various options for exporting environment configurations.
 
 ```bash
@@ -108,16 +115,16 @@ The `export` command offers various options for exporting environment configurat
 uvn export test
 
 # Export inline script metadata
-uvn export test --top-level --script
+uvn export test py --short --lower
 
 # Generate a requirements.txt file
-uvn export test --to requirements.txt
+uvn export test requirements.txt
 
 # Prepend inline script metadata (automatically detects ".py")
-uvn export test --to script.py
+uvn export test script.py
 
 # Clone the environment
-uvn export test --to test2
+uvn fork test test2
 ```
 
 > [!TIP]
@@ -131,11 +138,13 @@ Available commands in `uvn`:
 Usage: uvn [OPTIONS] COMMAND [ARGS]...
 
 ╭─ Commands ──────────────────────────────────────────────────────────────────────────────────────────╮
- list       List all available virtual environments.
- create     Create a virtual environment.
- remove     Remove a virtual environment.
- export     Export or clone a virtual environment.
- activate   Output the command to activate the specified environment.
+  list       List all virtual environments.
+  create     Create a virtual environment.
+  remove     Remove a virtual environment.
+  export     Export a virtual environment.
+  fork       Copy a virtual environment.
+  activate   Show environment command.
+  version    Show uvn version.
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ Options ───────────────────────────────────────────────────────────────────────────────────────────╮

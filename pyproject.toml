@@ -2,24 +2,27 @@
 name = "uvn"
 description = "uvn is conda for uv; a centralized Python virtual environment manager."
 keywords = ["uvn", "uv", "conda", "venv", "virtualenv", "uvenv"]
-authors = [
-    { name = "Modar M. Alfadly", email = "modar.alfadly@gmail.com" }
-]
-urls = {Homepage = "https://github.com/xmodar/uvn"}
-scripts = {uvn = "uvn:app"}
+authors = [{ name = "Modar M. Alfadly", email = "modar.alfadly@gmail.com" }]
+urls = { Homepage = "https://github.com/xmodar/uvn" }
+scripts = { uvn = "uvn.cli:app" }
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 dynamic = ["version"]
-requires-python = ">=3.8"
-dependencies = [
-    "typer>=0.12.5",
-]
+requires-python = ">=3.7"
+dependencies = []
+optional-dependencies = { cli = [
+    "typing-extensions",
+    "shellingham",
+    "rich",
+    "typer",
+] }
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -33,4 +36,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "uvn.py"
+path = "src/uvn/__init__.py"
